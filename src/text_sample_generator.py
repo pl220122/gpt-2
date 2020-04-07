@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
+#. ~/venv-gpt-2/bin/activate (activate environment from gpt-2 folder)
 
 import fire
 import json
 import os
 import numpy as np
 import tensorflow as tf
+import jsonlines
 
 import model, sample, encoder
 
@@ -69,25 +71,45 @@ def interact_model(
         ckpt = tf.train.latest_checkpoint(os.path.join(models_dir, model_name))
         saver.restore(sess, ckpt)
 
-        while True:
-            raw_text = input("Model prompt >>> ")
-            print(type(raw_text))
-            while not raw_text:
-                print('Prompt should not be empty!')
-                raw_text = input("Model prompt >>> ")
-            context_tokens = enc.encode(raw_text)
-            generated = 0
-            for _ in range(nsamples // batch_size):
-                out = sess.run(output, feed_dict={
-                    context: [context_tokens for _ in range(batch_size)]
-                })[:, len(context_tokens):]
-                for i in range(batch_size):
-                    generated += 1
-                    text = enc.decode(out[i])
-                    print("=" * 40 + " SAMPLE " + str(generated) + " " + "=" * 40)
-                    print(text)
-                    print(type(text))
-            print("=" * 80)
+        with jsonlines.open('first_100_train.jsonl', 'r') as reader:
+            with jsonlines.open('first_100_output.jsonl', mode='w') as writer:
+
+                for result in reader:
+                    #encode output into dictionary
+                    new_result = {}
+                    #print out result id as we go
+                    print(result["id"])
+                    #only take in first 700 characters as prompt
+                    if len(result["text"]) < 700:
+                        raw_text = result["text"]
+                    else:
+                        raw_text = result["text"][0:700]
+                    if not raw_text:
+                        print('Prompt should not be empty!')
+                        #edge case that we won't need to worry about
+                        raw_text = " "
+                    context_tokens = enc.encode(raw_text)
+                    generated = 0
+                    for _ in range(nsamples // batch_size):
+                        out = sess.run(output, feed_dict={
+                            context: [context_tokens for _ in range(batch_size)]
+                        })[:, len(context_tokens):]
+                        for i in range(batch_size):
+                            generated += 1
+                            text = enc.decode(out[i])
+                            #generate fields for new_result dictionary
+                            new_result["id"] =  result["id"]
+                            new_result["text"] =  text
+                            new_result["length"] =  len(text.split())
+                            new_result["ended"] =  True
+                        writer.write(new_result)
+                            #print("=" * 40 + " SAMPLE " + str(generated) + " " + "=" * 40)
+                            #print(text)
+                    #print("=" * 80)
+
+
+        reader.close()
+        writer.close()
 
 if __name__ == '__main__':
     fire.Fire(interact_model)
